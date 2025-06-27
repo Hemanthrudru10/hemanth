@@ -1,0 +1,107 @@
+# STEP 1: Install dependencies (run this and wait for restart)
+!pip install -Uq bitsandbytes
+!pip install -Uq transformers accelerate gradio sentencepiece huggingface_hub
+
+import os
+import sys
+if "google.colab" in sys.modules:
+    from IPython.display import clear_output
+    print("✅ Dependencies installed. Now restarting the runtime...")
+    clear_output()
+    os.kill(os.getpid(), 9)  # 🔁 Restart runtime
+# STEP 2: Import and load everything (AFTER restart)
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from huggingface_hub import notebook_login
+import torch
+import gradio as gr
+
+notebook_login()
+
+MODEL_NAME = "ibm-granite/granite-3.3-2b-instruct"
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.float16
+)
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_NAME,
+    quantization_config=bnb_config,
+    device_map="auto",
+    trust_remote_code=True
+)
+
+def generate_response(prompt, max_new_tokens=512):
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    outputs = model.generate(**inputs, max_new_tokens=max_new_tokens)
+    return tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+def symptoms_identifier(symptoms):
+    prompt = f"""As an advanced medical AI, analyze these symptoms and suggest possible conditions:
+
+Patient Symptoms: {symptoms}
+
+Possible Conditions (list 2-3 with brief explanations):
+1."""
+    response = generate_response(prompt)
+    return response.split("Possible Conditions:")[-1].strip()
+
+def home_remedies(disease):
+    prompt = f"""Provide safe, evidence-based home remedies for {disease}:
+
+Recommended Natural Remedies:
+-"""
+    response = generate_response(prompt)
+    return response.split("Recommended Natural Remedies:")[-1].strip()
+
+def medication(disease):
+    prompt = f"""Suggest medical treatments for {disease} (include disclaimer):
+
+Medical Guidance (ALWAYS consult a doctor first):
+-"""
+    response = generate_response(prompt)
+    return response.split("Medical Guidance:")[-1].strip()
+
+def patient_chatbot(disease):
+    prompt = f"""Explain {disease} to a patient in simple terms:
+
+What is {disease}?
+- Definition:
+- Common Symptoms:
+- When to See a Doctor:"""
+    response = generate_response(prompt)
+    return response.split("What is")[-1].strip()
+
+with gr.Blocks(theme=gr.themes.Soft(), title="HealthAI - Medical Assistant") as app:
+    gr.Markdown("# 🩺 HealthAI - IBM Granite-Powered Medical Assistant")
+
+    with gr.Tabs():
+        with gr.Tab("🔍 Symptom Analysis"):
+            symptom_input = gr.Textbox(label="Symptoms")
+            analyze_btn = gr.Button("Analyze")
+            diagnosis_output = gr.Textbox(label="Possible Conditions", lines=5)
+
+        with gr.Tab("🌿 Home Remedies"):
+            remedy_input = gr.Textbox(label="Condition")
+            remedy_btn = gr.Button("Get Remedies")
+            remedy_output = gr.Textbox(label="Recommended Remedies", lines=5)
+
+        with gr.Tab("💊 Medication Guide"):
+            med_input = gr.Textbox(label="Condition")
+            med_btn = gr.Button("Get Medical Advice")
+            med_output = gr.Textbox(label="Treatment Options", lines=5)
+
+        with gr.Tab("💬 Disease Information"):
+            info_input = gr.Textbox(label="Condition")
+            info_btn = gr.Button("Explain")
+            info_output = gr.Textbox(label="Detailed Information", lines=7)
+
+    analyze_btn.click(symptoms_identifier, inputs=symptom_input, outputs=diagnosis_output)
+    remedy_btn.click(home_remedies, inputs=remedy_input, outputs=remedy_output)
+    med_btn.click(medication, inputs=med_input, outputs=med_output)
+    info_btn.click(patient_chatbot, inputs=info_input, outputs=info_output)
+
+app.launch(share=True, debug=True)
